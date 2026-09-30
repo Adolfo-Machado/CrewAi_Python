@@ -1,10 +1,8 @@
 # Import das Libs
 import os
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import yfinance as yf
-# O dotenv era utilizado quando fazia leitura do .env agora o próprio Streamlit já cuida da leitura
-# from dotenv import load_dotenv
 
 from crewai import Agent, Task, Crew, Process, LLM
 from crewai.tools import tool
@@ -14,13 +12,18 @@ from langchain_community.tools import DuckDuckGoSearchResults
 
 import streamlit as st
 
-# load_dotenv()
+
+# Quantos meses de histórico buscar no Yahoo Finance.
+# Menos meses = menos texto pra IA processar (mais rápido e mais barato em tokens),
+MESES_HISTORICO = 6
 
 # Criando Yahoo Finance Tool
 @tool("Yahoo Finance Tool")
 def fetch_stock_price(ticket: str) -> str:
     """Busca o histórico de preço da ação (ticket) no Yahoo Finance."""
-    stock = yf.download(ticket, start="2026-01-01", end="2026-12-31")
+    fim = datetime.now()
+    inicio = fim - timedelta(days=MESES_HISTORICO * 30)
+    stock = yf.download(ticket, start=inicio.strftime("%Y-%m-%d"), end=fim.strftime("%Y-%m-%d"))
     return stock.to_string()
 
 #Chave de API
@@ -139,7 +142,6 @@ writeAnalyses = Task(
 
 
 # Criando o grupo de Agentes
-# full_output, share_crew e max_iter (neste nível) não existem mais nas versões atuais do crewai
 crew = Crew(
     agents = [stockPriceAnalyst, newsAnalyst, stockAnalystWrite],
     tasks = [getStockPrice, get_news, writeAnalyses],
@@ -149,20 +151,52 @@ crew = Crew(
 )
 
 
+def ticker_valido(ticket: str) -> bool:
+    """Confere rapidamente se o ticker existe de verdade no Yahoo Finance, ANTES de gastar
+    chamadas de IA (e tempo) numa análise que não vai servir pra nada por falta de dado real."""
+    try:
+        dados = yf.download(ticket, period="5d", progress=False)
+        return not dados.empty
+    except Exception:
+        return False
+
+
 with st.sidebar:
     st.header('Enter the Stock to Research')
 
     with st.form(key='research_form'):
         topic = st.text_input("Select the ticket")
+        periodo_meses = st.selectbox(
+            "History period", options=[3, 6], index=1, format_func=lambda x: f"Last {x} months"
+        )
         submit_button = st.form_submit_button(label = "Run research")
 
 if submit_button:
     if not topic:
         st.error("Please fill the ticket field")
+    elif not ticker_valido(topic):
+        st.error(f"Couldn't find data for ticket '{topic}'. Check if the code is correct (e.g. AAPL, MSFT).")
     else:
+        # A ferramenta fetch_stock_price é chamada pelo próprio agente de IA, não por este
+        # código diretamente - por isso não dá pra "passar" o período escolhido como argumento
+        # dela com segurança. Em vez disso, atualizamos a variável global ANTES de rodar o
+        # crew, e a ferramenta lê esse valor quando for chamada.
+        MESES_HISTORICO = periodo_meses
+
         # Um script .py rodado pelo Streamlit não tem o "event loop" do Jupyter rodando,
         # então usamos a versão síncrona normal (sem await)
-        results = crew.kickoff(inputs={'ticket': topic})
+        # st.spinner mostra um "carregando..." enquanto o código de dentro do "with" roda -
+        # sem ele, a tela fica parada e parece travada enquanto os 3 agentes trabalham
+        results = None
+        with st.spinner("Agents are working on your request... this can take a few minutes"):
+            try:
+                results = crew.kickoff(inputs={'ticket': topic})
+            except Exception as e:
+                # Pega qualquer erro que aconteça DURANTE a análise (cota da API estourada,
+                # falha de rede, etc) e mostra uma mensagem amigável em vez da tela de erro feia
+                # padrão do Streamlit
+                st.error(f"Something went wrong while running the analysis: {e}")
 
-        st.subheader("Results of your research")
-        st.write(results.raw)
+        if results:
+            st.subheader("Results of your research")
+            st.write(results.raw)
