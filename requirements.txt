@@ -1,0 +1,6 @@
+crewai==1.15.22
+yfinance==1.7.0
+langchain-community==0.4.2
+ddgs==9.16.0
+google-genai==2.25.0
+streamlit==1.64.0
