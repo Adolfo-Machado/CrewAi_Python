@@ -15,7 +15,7 @@ import streamlit as st
 
 # Quantos meses de histórico buscar no Yahoo Finance.
 # Menos meses = menos texto pra IA processar (mais rápido e mais barato em tokens),
-MESES_HISTORICO = 6
+MESES_HISTORICO = 3
 
 # Criando Yahoo Finance Tool
 @tool("Yahoo Finance Tool")
@@ -167,7 +167,7 @@ with st.sidebar:
     with st.form(key='research_form'):
         topic = st.text_input("Select the ticket")
         periodo_meses = st.selectbox(
-            "History period", options=[3, 6], index=1, format_func=lambda x: f"Last {x} months"
+            "History period", options=[3, 6], index=0, format_func=lambda x: f"Last {x} months"
         )
         submit_button = st.form_submit_button(label = "Run research")
 
